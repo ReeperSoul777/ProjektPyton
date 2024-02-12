@@ -6,13 +6,16 @@ import os
 from datetime import datetime, timedelta
 import csv
 
+
+
 class InvoiceManager:
-    def __init__(self, filename, numerators_filename):
-        self.filename = filename
-        self.numerators_filename = numerators_filename
+    def __init__(self):
+        self.filename = 'faktury.csv'
+        self.platnosci = 'platnosci.csv'
+        self.numerators_filename = 'numerator.csv'
         self.invoice_number = self._get_last_invoice_number()
         self._check_file_exists()
-            
+        self._check_file_exists2()           
 
     def _get_last_invoice_number(self):
         if os.path.exists(self.numerators_filename):
@@ -25,71 +28,163 @@ class InvoiceManager:
         if not os.path.exists(self.filename):
             with open(self.filename, 'w', newline='', encoding='utf-8') as file:
                 writer = csv.writer(file, delimiter='\t')
-                writer.writerow(['Numer_faktury', 'Numer_orginalu', 'Kwota', 'Waluta', 'Data_wystawienia', 'Termin', 'Data_platnosci'])
+                writer.writerow(['Numer_faktury', 'Numer_orginalu', 'Kwota', 'Waluta', 'Data_wystawienia',])
+
+    def _check_file_exists2(self):          
+        if not os.path.exists(self.platnosci):
+            with open(self.platnosci, 'w', newline='', encoding='utf-8') as file:
+                writer = csv.writer(file, delimiter='\t')
+                writer.writerow(['Numer_faktury', 'Kwota', 'Data_platnosci',])
 
     def _update_invoice_number(self):
         with open(self.numerators_filename, 'w', encoding='utf-8') as file:
             file.write(str(self.invoice_number))
     
     def _generate_invoice_number(self):
-        current_month_year = datetime.now().strftime("%m-%Y")
+        current_month_year = datetime.now().strftime("%m/%Y")
         self.invoice_number += 1
         invoice_number = f"{self.invoice_number}/{current_month_year}"
         self._update_invoice_number()
         return invoice_number
     
-    def add_invoice(self, Numer_orginalu, amount, currency, issue_date, termin, ):
+    def read_invoice_numbers(self):
+        invoice_numbers = []
+        try:
+            with open(self.filename, 'r', newline='', encoding='utf-8') as csvfile:
+                reader = csv.DictReader(csvfile, delimiter='\t')
+                for row in reader:
+                    invoice_numbers.append(row['Numer_faktury'])
+        except FileNotFoundError:
+            print(f"Plik {self.filename} nie został znaleziony.")
+        except Exception as e:
+            print(f"Wystąpił błąd: {e}")
+        return invoice_numbers
+    
+    def add_invoice(self, nr_org, amount, currency,issue_date):
         invoice_number = self._generate_invoice_number()
+        if not amount or not currency:
+            tk.messagebox.showerror("Błąd", "Pola 'Kwota' i 'Waluta' nie mogą być puste")
+            return
         with open(self.filename, 'a', newline='', encoding='utf-8') as file:
             writer = csv.writer(file, delimiter='\t')
-            writer.writerow([invoice_number, Numer_orginalu, amount, currency, issue_date, termin])
+            writer.writerow([invoice_number, nr_org, amount, currency, issue_date])
+        tk.messagebox.showinfo("Info", "Faktura dodana pomyślnie")
+
+
+    def add_payment(self, invoice_number, amount, issue_date):
+        if not amount or not invoice_number:
+            tk.messagebox.showerror("Błąd", "Pole 'Kwota' i 'Nr faktury' nie może być puste")
+            return
+        with open(self.platnosci, 'a', newline='', encoding='utf-8') as file:
+            writer = csv.writer(file, delimiter='\t')
+            writer.writerow([invoice_number, amount, issue_date])
+        tk.messagebox.showinfo("Info", "Płatność dodana pomyślnie")
+
+class CSVViewer:
+    def __init__(self, root, csv_file, title):
+        self.root = root
+        self.csv_file = csv_file
+        self.frame = tk.LabelFrame(root, text=title, padx=10, pady=10)
+        self.tree = None
+        self._setup_ui()
+
+    def _setup_ui(self):
+        self.frame.grid(padx=10, pady=10, sticky="nsew", columnspan=2)
+        self.tree = ttk.Treeview(self.frame)
+        self.tree.pack(expand=True, fill="both", side="left")
+        
+        scrollbar = ttk.Scrollbar(self.frame, orient="vertical", command=self.tree.yview)
+        scrollbar.pack(side="right", fill="y")
+        self.tree.configure(yscrollcommand=scrollbar.set)
+
+        self._load_csv_data()
+
+    def _load_csv_data(self):
+        with open(self.csv_file, newline='', encoding='utf-8') as csvfile:
+            reader = csv.reader(csvfile, delimiter='\t')
+            headers = next(reader)
+            self.tree['columns'] = headers
+            self.tree['show'] = 'headings'
+            for header in headers:
+                self.tree.heading(header, text=header)
+            
+            for row in reader:
+                self.tree.insert('', 'end', values=row)
+
 
 class InvoiceApp:
     def __init__(self, root):
-        self.manager = InvoiceManager("faktury.csv", "numerator.csv")
+        self.invoice = InvoiceManager()
         root.title("MenedżerFk")
 
-        ### SEKCJA DODAJ FAKTURE###
-        add_invoice_frame = tk.LabelFrame(root, text="Dodaj Fakturę", padx=10, pady=10)
-        add_invoice_frame.grid(row=0, column=0, padx=10, pady=10, sticky="ew")
-
+### SEKCJA DODAJ FAKTURE###
+        invoice_list = self.invoice.read_invoice_numbers()
+        gui_frame = tk.LabelFrame(root, text="Dodaj Fakturę", padx=10, pady=10)
+        gui_frame.grid(row=0, column=0, padx=10, pady=10, sticky="ew")
         self.nr_org_var = tk.StringVar()
         self.amount_var = tk.IntVar()
+        self.amount2_var = tk.IntVar()
+        self.currency_options = ["USD", "EUR", "PLN"]
         self.currency_var = tk.StringVar()
-        self.termin_var = tk.IntVar()
+        self.invoice_var = tk.StringVar()
 
-        tk.Label(add_invoice_frame, text="Numer orginału:").grid(row=0, column=0)
-        tk.Entry(add_invoice_frame, textvariable=self.nr_org_var).grid(row=0, column=1)
+        tk.Label(gui_frame, text="Numer orginału:").grid(row=0, column=0)
+        tk.Entry(gui_frame, textvariable=self.nr_org_var).grid(row=0, column=1)
         
-        tk.Label(add_invoice_frame, text="Kwota:").grid(row=1, column=0)
-        tk.Entry(add_invoice_frame, textvariable=self.amount_var).grid(row=1, column=1)
+        tk.Label(gui_frame, text="Kwota:").grid(row=1, column=0)
+        tk.Entry(gui_frame, textvariable=self.amount_var).grid(row=1, column=1)
 
-        tk.Label(add_invoice_frame, text="Waluta:").grid(row=2, column=0)
-        tk.Entry(add_invoice_frame, textvariable=self.currency_var).grid(row=2, column=1)
+        tk.Label(gui_frame, text="Waluta:").grid(row=2, column=0)
+        currency_combobox = ttk.Combobox(gui_frame, textvariable=self.currency_var, values=self.currency_options, state="readonly")
+        currency_combobox.grid(row=2, column=1)
+        currency_combobox.set('')
 
-        tk.Label(add_invoice_frame, text="Termin płatności (dni):").grid(row=3, column=0)
-        tk.Entry(add_invoice_frame, textvariable=self.termin_var).grid(row=3, column=1)
+        tk.Label(gui_frame, text="Data wystawienia:").grid(row=0, column=2)
+        self.cal = Calendar(gui_frame, selectmode='day', year=datetime.now().year, month=datetime.now().month, day=datetime.now().day, date_pattern="yyyy-mm-dd")
+        self.cal.grid(row=1, column=2, rowspan=15)
 
-        tk.Label(add_invoice_frame, text="Data wystawienia:").grid(row=0, column=2)
-        self.cal = Calendar(add_invoice_frame, selectmode='day', year=datetime.now().year, month=datetime.now().month, day=datetime.now().day, date_pattern="yyyy-mm-dd")
-        self.cal.grid(row=1, column=2, rowspan=5)
+        tk.Button(gui_frame, text="Dodaj fakturę", command=self.add_invoice).grid(row=4, column=0, columnspan=2)
+    ### KONIEC SIEKCJI ###
+        
+### SEKCJA DODAJ PLATNOSC###
 
-        tk.Button(add_invoice_frame, text="Dodaj fakturę", command=self.add_invoice).grid(row=4, column=0)
-        ### KONIEC SIEKCJI ###
+        gui_frame = tk.LabelFrame(root, text="Dodaj Platnosc", padx=10, pady=10)
+        gui_frame.grid(row=0, column=1, padx=10, pady=10, sticky="ew")
+        tk.Label(gui_frame, text="Nr faktury:").grid(row=0, column=0)
+        invoice_combobox = ttk.Combobox(gui_frame, textvariable=self.invoice_var, values=invoice_list, state="readonly")
+        invoice_combobox.grid(row=0, column=1)
+        invoice_combobox.set('')
+
+        self.amount2_var = tk.IntVar()
+
+        tk.Label(gui_frame, text="Kwota:").grid(row=1, column=0)
+        tk.Entry(gui_frame, textvariable=self.amount2_var).grid(row=1, column=1)
+
+
+        tk.Label(gui_frame, text="Data płatnośći:").grid(row=0, column=2)
+        self.cal2 = Calendar(gui_frame, selectmode='day', year=datetime.now().year, month=datetime.now().month, day=datetime.now().day, date_pattern="yyyy-mm-dd")
+        self.cal2.grid(row=1, column=2, rowspan=15)
+
+        tk.Button(gui_frame, text="Dodaj Płatność", command=self.add_payment).grid(row=4, column=0, columnspan=2)
+    ### KONIEC SIEKCJI ###
+        
+### CSVViewer###  
+        CSVViewer(root, "faktury.csv", "Obczaj to !")
+    ###KONIEC###
 
     def add_invoice(self):
         amount = self.amount_var.get()
         currency = self.currency_var.get()
         issue_date = self.cal.get_date()
-        Numer_orginalu = self.nr_org_var.get()
-        termin = self.termin_var.get()
+        nr_org = self.nr_org_var.get()
+        self.invoice.add_invoice(nr_org, amount, currency, issue_date)
 
-        if not amount or not currency:
-            tk.messagebox.showerror("Błąd", "Pola 'Kwota' i 'Waluta' nie mogą być puste")
-            return
-           
-        self.manager.add_invoice( Numer_orginalu, amount, currency, issue_date, termin)
-        tk.messagebox.showinfo("Info", "Faktura dodana pomyślnie")
+    def add_payment(self):
+        invoice_number = self.invoice_var.get()
+        amount = self.amount2_var.get()
+        payment_date = self.cal2.get_date()
+        self.invoice.add_payment(invoice_number, amount, payment_date)
+
 
 root = tk.Tk()
 app = InvoiceApp(root)
