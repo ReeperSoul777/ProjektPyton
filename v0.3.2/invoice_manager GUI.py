@@ -18,8 +18,7 @@ class InvoiceManager:
         self.invoice_number = self._get_last_invoice_number()
         self._check_file_exists()
         self._check_file_exists2()           
-        self._check_file_exists3() 
-        self._rozlicz_platnosci_1()
+        self.settle_pay()
 
     def _get_last_invoice_number(self):
         if os.path.exists(self.numerators_filename):
@@ -28,36 +27,31 @@ class InvoiceManager:
                 return int(last_number) if last_number else 0
         return 0
 
-    def _check_file_exists(self):
+    def _check_file_exists(self): # Funkcja sprawdza czy istniej plik jeśli nie tworzy go z odpowiednimi nagłówkami kolumn
         if not os.path.exists(self.filename):
             with open(self.filename, 'w', newline='', encoding='utf-8') as file:
                 writer = csv.writer(file, delimiter='\t')
                 writer.writerow(['Numer_faktury', 'Numer_orginalu', 'Kwota', 'Waluta', 'Data_wystawienia',])
 
-    def _check_file_exists2(self):          
+    def _check_file_exists2(self):     # Funkcja sprawdza czy istniej plik jeśli nie tworzy go z odpowiednimi nagłówkami kolumn     
         if not os.path.exists(self.platnosci):
             with open(self.platnosci, 'w', newline='', encoding='utf-8') as file:
                 writer = csv.writer(file, delimiter='\t')
                 writer.writerow(['Numer_faktury', 'Kwota', 'Data_platnosci',])
 
-    def _check_file_exists3(self):          
-        if not os.path.exists(self.bilans):
-            with open(self.bilans, 'w', newline='', encoding='utf-8') as file:
-                writer = csv.writer(file, delimiter='\t')
-                writer.writerow(['Numer_faktury','Kwota','waluta','zapłacono','pozostalo','Data_platnosci','roznica_kursowa'])
 
-    def _update_invoice_number(self):
+    def _update_invoice_number(self):       #funkcja zapisuje do pliku ostatni użyty numer faktury
         with open(self.numerators_filename, 'w', encoding='utf-8') as file:
             file.write(str(self.invoice_number))
     
-    def _generate_invoice_number(self):
+    def _generate_invoice_number(self):     #funkcja tworzy numer faktury według ustalonego schematu
         current_month_year = datetime.now().strftime("%m/%Y")
         self.invoice_number += 1
         invoice_number = f"{self.invoice_number}/{current_month_year}"
         self._update_invoice_number()
         return invoice_number
     
-    def read_invoice_numbers(self):
+    def read_invoice_numbers(self):   #Fukncja odczytuje numery faktur ( wygenerowane automatycznie przez generator) z pliku faktury.csv
         invoice_numbers = []
         try:
             with open(self.filename, 'r', newline='', encoding='utf-8') as csvfile:
@@ -70,7 +64,7 @@ class InvoiceManager:
             print(f"Wystąpił błąd: {e}")
         return invoice_numbers
     
-    def add_invoice(self, nr_org, amount, currency,issue_date):
+    def add_invoice(self, nr_org, amount, currency,issue_date): #Funkcja wpisuje szczegóły dotyczące faktury do pliku faktury.csv
         if not amount or not currency:
             tk.messagebox.showerror("Błąd", "Pola 'Kwota' i 'Waluta' nie mogą być puste")
             return
@@ -81,7 +75,7 @@ class InvoiceManager:
         tk.messagebox.showinfo("Info", "Faktura dodana pomyślnie")
 
 
-    def add_payment(self, invoice_number, amount, issue_date):
+    def add_payment(self, invoice_number, amount, issue_date): #Funkcja wpisuje szczegóły dotyczące płatniści do pliku płatności.csv
         if not amount or not invoice_number:
             tk.messagebox.showerror("Błąd", "Pole 'Kwota' i 'Nr faktury' nie może być puste")
             return
@@ -90,25 +84,25 @@ class InvoiceManager:
             writer.writerow([invoice_number, amount, issue_date])
         tk.messagebox.showinfo("Info", "Płatność dodana pomyślnie")
 
-    def pobierz_kurs_waluty(self, kod_waluty, data, prob=5):
-        if kod_waluty == 'PLN':
+    def get_ex_rate(self, currency_ID, date, number=5):   #Pobiera kursy walut według w parametrach pobiera kod_waluty = currency_ID i Datę, zmienna odpowiadająca ilości prób = try pobrania kursu)
+        if currency_ID == 'PLN':  
             return None 
-        if prob == 0:
+        if number == 0:
             print("Nie udało się pobrać kursu waluty po 5 próbach.")
             return None
-        url = f"http://api.nbp.pl/api/exchangerates/rates/A/{kod_waluty}/{data}/?format=json"
+        url = f"http://api.nbp.pl/api/exchangerates/rates/A/{currency_ID}/{date}/?format=json"
         try:
             response = requests.get(url)
             response.raise_for_status()  # Sprawdza, czy zapytanie zostało pomyślnie obsłużone
-            data = response.json()
-            kurs_waluty = data['rates'][0]['mid']
-            return kurs_waluty
+            date = response.json()
+            ex_rate = date['rates'][0]['mid']
+            return ex_rate
         except requests.exceptions.HTTPError as e:
             if e.response.status_code == 400:
-                print(f"Nie znaleziono danych {kod_waluty} dla daty: {data}, próba z poprzednim dniem. (Pozostało prób {prob})")
-                nowa_data = datetime.strptime(data, "%Y-%m-%d") - timedelta(days=1)
-                nowa_data_str = nowa_data.strftime("%Y-%m-%d")
-                return self.pobierz_kurs_waluty(kod_waluty, nowa_data_str, prob-1)
+                print(f"Nie znaleziono danych {currency_ID} dla daty: {date}, próba z poprzednim dniem. (Pozostało prób {number})")
+                new_date = datetime.strptime(date, "%Y-%m-%d") - timedelta(days=1)
+                new_date_str = new_date.strftime("%Y-%m-%d")
+                return self.get_ex_rate(currency_ID, new_date_str, number-1)
             else:
                 print(f"Błąd zapytania: {e}")
         except requests.exceptions.RequestException as e:
@@ -116,9 +110,8 @@ class InvoiceManager:
         return None
 
 
-    def _rozlicz_platnosci_1(self):
-        faktury = {}
-    # Krok 1: Wczytanie danych o fakturach
+    def settle_pay(self):                     #Krok 1 do powstania pliku bilans.cvs - Fukncja pobiera warosci z pliku faktury.csv
+        faktury = {}                                            # na koniec wywołuję funkcję odpowiedzialną za 2 krok
         with open('faktury.csv', 'r', newline='', encoding='utf-8') as file:
             reader = csv.DictReader(file, delimiter='\t')
             for row in reader:
@@ -131,11 +124,11 @@ class InvoiceManager:
                 'data_platnosci': None,
                 'roznica_kursowa': None
             }
-            self._rozlicz_platnosci_2(faktury)
+            self._settle_pay_2(faktury)
                          
-    def _rozlicz_platnosci_2(self, faktury):
-        with open('platnosci.csv', 'r', newline='', encoding='utf-8') as file:
-            reader = csv.DictReader(file, delimiter='\t')
+    def _settle_pay_2(self, faktury):            #Krok 2 do powstania pliku bilans.cvs - Fukncja pobiera warosci z pliku platnosci.csv i wykonuje operacja na danych.
+        with open('platnosci.csv', 'r', newline='', encoding='utf-8') as file:      #odwołuje się do funkcji get_ex_rate pobiera kursy walut z dnia i waluty odpowiedniego dacie faktury i platnosci
+            reader = csv.DictReader(file, delimiter='\t')                                   # na koniec wywołuję funkcję odpowiedzialną za 3 krok
             for row in reader:
                 nr_faktury = row['Numer_faktury']
                 if nr_faktury in faktury:
@@ -147,25 +140,22 @@ class InvoiceManager:
                 if faktura['data_platnosci'] is None or data_platnosci > faktura['data_platnosci']:
                     faktura['data_platnosci'] = data_platnosci
 
-                kurs_wystawienia = self.pobierz_kurs_waluty(faktura['waluta'], faktura['data_faktury'])
-                kurs_platnosci = self.pobierz_kurs_waluty(faktura['waluta'], row['Data_platnosci'])
-
+                kurs_wystawienia = self.get_ex_rate(faktura['waluta'], faktura['data_faktury'])
+                kurs_platnosci = self.get_ex_rate(faktura['waluta'], row['Data_platnosci'])
                 if kurs_wystawienia and kurs_platnosci:
                     faktura['roznica_kursowa'] = kurs_wystawienia - kurs_platnosci
                 else:
                     faktura['roznica_kursowa'] = None
 
-            self._rozlicz_platnosci_3(faktury)
+            self._settle_pay_3(faktury)
 
-    def _rozlicz_platnosci_3(self,faktury):
+    def _settle_pay_3(self,faktury):              #Krok 3 do powstania pliku bilans.cvs - zapisuje dane do pliku bilans.csv, tworzy nagłówki, skraca roznice kursowa do 4 miejsc po przecinku.
         with open('bilans.csv', 'w', newline='', encoding='utf-8') as file:
             fieldnames = ['Numer_faktury', 'Kwota', 'Waluta', 'Zaplacono', 'Pozostalo', 'Data_platnosci','roznica_kursowa']
             writer = csv.DictWriter(file, fieldnames=fieldnames, delimiter='\t')
             writer.writeheader()
             for nr_faktury, dane in faktury.items():
-                roznica_kursowa_formatowane = "{:.4f}".format(dane['roznica_kursowa']) if dane['roznica_kursowa'] is not None else 'Brak danych'
-                #print(dane['roznica_kursowa'],"dane")
-               # print(roznica_kursowa_formatowane,"roznica")
+                ex_rate = "{:.4f}".format(dane['roznica_kursowa']) if dane['roznica_kursowa'] is not None else 'Brak danych'
                 writer.writerow({
                 'Numer_faktury': nr_faktury,
                 'Kwota': dane['kwota'],
@@ -173,7 +163,7 @@ class InvoiceManager:
                 'Zaplacono': dane['zaplacono'],
                 'Pozostalo': dane['pozostalo'],
                 'Data_platnosci': dane['data_platnosci'].strftime("%Y-%m-%d") if dane['data_platnosci'] else 'Brak płatności',
-                'roznica_kursowa': roznica_kursowa_formatowane
+                'roznica_kursowa': ex_rate
             })
 
         
@@ -293,7 +283,7 @@ class InvoiceApp:
         self.invoice.add_payment(invoice_number, amount, payment_date)
 
     def ref_bil(self):
-        self.invoice._rozlicz_platnosci_1()
+        self.invoice.settle_pay()
 
     def ref_inv(self):
         invoice_list = self.invoice.read_invoice_numbers()
@@ -303,7 +293,7 @@ class InvoiceApp:
     def kurs(self):
         currency = self.currency_var.get()
         issue_date = self.cal.get_date()
-        self.invoice.pobierz_kurs_waluty(currency, issue_date)
+        self.invoice.get_ex_rate(currency, issue_date)
 
 
 root = tk.Tk()
